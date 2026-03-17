@@ -17,7 +17,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
             base.AfterExecuteOperationTransaction(e);
 
             
-            OASyncSerice oASync = new OASyncSerice();
+            OASyncService oASync = new OASyncService();
             //读取全部的单据,for循环,转换成DynamicObject类型
             foreach (DynamicObject entity in e.DataEntitys)
             {
