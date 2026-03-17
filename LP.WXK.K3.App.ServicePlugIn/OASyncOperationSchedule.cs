@@ -1,44 +1,117 @@
 ﻿using Kingdee.BOS;
 using Kingdee.BOS.Contracts;
 using Kingdee.BOS.Core;
+using Kingdee.BOS.App.Data;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Data;
 
 namespace LP.WXK.K3.App.ServicePlugIn
 {
-    class OASyncOperationSchedule : IScheduleService
+    /// <summary>
+    /// OA同步定时任务
+    /// 定时查询"未反写OA状态"且"银行处理状态=已付款确认"的单据，推送到OA系统
+    /// </summary>
+    public class OASyncOperationSchedule : IScheduleService
     {
-        // 通过定时任务，查询位同步定期调用泛微OA接口，同步OA节点
+        /// <summary>
+        /// 银行处理状态：已付款
+        /// </summary>
+        private const string BANK_STATUS_PAID = "F";
+
+        /// <summary>
+        /// 定时任务执行入口
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="schedule">定时任务配置</param>
         public void Run(Context ctx, Schedule schedule)
         {
+            OASyncService oASync = new OASyncService();
 
-            long payId = Convert.ToInt64(entity["Id"]);
-            var typeName = entity.DynamicObjectType.Name;
-            var tableName = "";
-            if (typeName.Equals("PAYBILL"))
-            {// 付款单
-                tableName = "T_AP_PAYBILL";
-            }
-            else if (typeName.Equals("REFUNDBILL"))
-            {// 收款退款单
-                tableName = "T_AR_REFUNDBILL";
-            }
-            bool isSync = oASync.skipCurrentCodeAsync(this.Context, Convert.ToString(payId));
-            // F_TWLG_OAStatus = 0（未反写）、1（已处理）
-            if (isSync)
+            ProcessPayBill(ctx, oASync);
+            ProcessRefundBill(ctx, oASync);
+        }
+
+        /// <summary>
+        /// 处理付款单
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="oASync">OA同步服务</param>
+        private void ProcessPayBill(Context ctx, OASyncService oASync)
+        {
+            string sql = @"
+                SELECT DISTINCT a.FID 
+                FROM T_AP_PAYBILL a
+                INNER JOIN T_AP_PAYBILLENTRY_B b ON a.FID = b.FID
+                WHERE (a.F_TWLG_OAStatus = 0 OR a.F_TWLG_OAStatus = 2 OR a.F_TWLG_OAStatus IS NULL )
+                  AND b.FBANKSTATUS = '{0}'";
+
+            sql = string.Format(sql, BANK_STATUS_PAID);
+            ProcessBills(ctx, oASync, sql, "T_AP_PAYBILL");
+        }
+
+        /// <summary>
+        /// 处理收款退款单
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="oASync">OA同步服务</param>
+        private void ProcessRefundBill(Context ctx, OASyncService oASync)
+        {
+            string sql = @"
+                SELECT DISTINCT a.FID 
+                FROM T_AR_REFUNDBILL a
+                INNER JOIN T_AR_REFUNDBILLENTRY_B b ON a.FID = b.FID
+                WHERE (a.F_TWLG_OAStatus = 0 OR a.F_TWLG_OAStatus = 2 OR a.F_TWLG_OAStatus IS NULL)
+                  AND b.FBankStatus = '{0}'";
+
+            sql = string.Format(sql, BANK_STATUS_PAID);
+            ProcessBills(ctx, oASync, sql, "T_AR_REFUNDBILL");
+        }
+
+        /// <summary>
+        /// 处理单据通用方法
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="oASync">OA同步服务</param>
+        /// <param name="sql">查询SQL</param>
+        /// <param name="tableName">表名</param>
+        private void ProcessBills(Context ctx, OASyncService oASync, string sql, string tableName)
+        {
+            try
             {
-                string sqlStr = string.Format(@"update {0} set F_TWLG_OAStatus = 1 where FID = {1}", tableName, payId);
-                DBUtils.Execute(this.Context, sqlStr);
+                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                {
+                    while (reader.Read())
+                    {
+                        try
+                        {
+                            long billId = Convert.ToInt64(reader["FID"]);
+                            bool isSync = oASync.skipCurrentCodeAsync(ctx, Convert.ToString(billId));
+
+                            string updateSql;
+                            if (isSync)
+                            {
+                                updateSql = string.Format(
+                                    "UPDATE {0} SET F_TWLG_OAStatus = 1 WHERE FID = {1}",
+                                    tableName, billId);
+                            }
+                            else
+                            {
+                                updateSql = string.Format(
+                                    "UPDATE {0} SET F_TWLG_OAStatus = 2 WHERE FID = {1}",
+                                    tableName, billId);
+                            }
+                            DBUtils.Execute(ctx, updateSql);
+                        }
+                        catch (Exception ex)
+                        {
+                            continue;
+                        }
+                    }
+                }
             }
-            else
+            catch (Exception)
             {
-                string sqlStr = string.Format(@"update {0} set F_TWLG_OAStatus = 0 where FID = {1}", tableName, payId);
-                DBUtils.Execute(this.Context, sqlStr);
             }
-            throw new NotImplementedException();
         }
     }
 }
