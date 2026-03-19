@@ -39,10 +39,10 @@ namespace LP.WXK.K3.App.ServicePlugIn
         private void ProcessPayBill(Context ctx, OASyncService oASync)
         {
             string sql = @"
-                SELECT DISTINCT a.FID 
+                SELECT DISTINCT a.FID, a.F_TWLG_LCBM
                 FROM T_AP_PAYBILL a
                 INNER JOIN T_AP_PAYBILLENTRY_B b ON a.FID = b.FID
-                WHERE (a.F_TWLG_OAStatus = 0 OR a.F_TWLG_OAStatus = 2 OR a.F_TWLG_OAStatus IS NULL )
+                WHERE (a.F_TWLG_OAStatus = 0 OR a.F_TWLG_OAStatus = 2 OR a.F_TWLG_OAStatus IS NULL)
                   AND b.FBANKSTATUS = '{0}'";
 
             sql = string.Format(sql, BANK_STATUS_PAID);
@@ -57,7 +57,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         private void ProcessRefundBill(Context ctx, OASyncService oASync)
         {
             string sql = @"
-                SELECT DISTINCT a.FID 
+                SELECT DISTINCT a.FID, a.F_TWLG_LCBM
                 FROM T_AR_REFUNDBILL a
                 INNER JOIN T_AR_REFUNDBILLENTRY_B b ON a.FID = b.FID
                 WHERE (a.F_TWLG_OAStatus = 0 OR a.F_TWLG_OAStatus = 2 OR a.F_TWLG_OAStatus IS NULL)
@@ -85,7 +85,8 @@ namespace LP.WXK.K3.App.ServicePlugIn
                         try
                         {
                             long billId = Convert.ToInt64(reader["FID"]);
-                            bool isSync = oASync.skipCurrentCodeAsync(ctx, Convert.ToString(billId));
+                            string lcbm = Convert.ToString(reader["F_TWLG_LCBM"]);
+                            bool isSync = oASync.skipCurrentCodeAsync(ctx, lcbm);
 
                             string updateSql;
                             if (isSync)
