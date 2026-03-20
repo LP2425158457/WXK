@@ -47,7 +47,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
             {
                 string sql = @"
                     SELECT F_TWLG_FilterContent 
-                    FROM TWLG_RecDetailFilter 
+                    FROM T_TWLG_RecDetailFilter 
                     WHERE FDOCUMENTSTATUS = 'C' 
                       AND FFORBIDSTATUS = 'A'";
 
@@ -86,8 +86,8 @@ namespace LP.WXK.K3.App.ServicePlugIn
             try
             {
                 string sql = @"
-                    SELECT FID, FEXPLANATION, FOppBankAcntName 
-                    FROM WB_RecBankTradeDetail 
+                    SELECT FID, FBILLNO, FEXPLANATION, FOppBankAcntName 
+                    FROM T_CN_BANKCASHFLOW 
                     WHERE F_TWLG_OASyncStatus = 0 
                       AND FDOCUMENTSTATUS = 'C'";
 
@@ -98,6 +98,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                         try
                         {
                             long billId = Convert.ToInt64(reader["FID"]);
+                            string billNo = Convert.ToString(reader["FBILLNO"]);
                             string summary = Convert.ToString(reader["FEXPLANATION"]) ?? "";
                             string oppAccountName = Convert.ToString(reader["FOppBankAcntName"]) ?? "";
 
@@ -122,7 +123,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                                 continue;
                             }
 
-                            bool isSync = recDetailSync.syncBill(ctx, billId);
+                            bool isSync = recDetailSync.syncBill(ctx, billNo);
 
                             int status = isSync ? 1 : 2;
                             UpdateSyncStatus(ctx, billId, status);
@@ -150,7 +151,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
             try
             {
                 string sql = string.Format(
-                    "UPDATE WB_RecBankTradeDetail SET F_TWLG_OASyncStatus = {0} WHERE FID = {1}",
+                    "UPDATE T_CN_BANKCASHFLOW SET F_TWLG_OASyncStatus = {0} WHERE FID = {1}",
                     status, billId);
                 DBUtils.Execute(ctx, sql);
             }

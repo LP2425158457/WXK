@@ -6,6 +6,7 @@ using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Orm.DataEntity;
 using System;
 using System.Data;
+using Kingdee.BOS;
 
 namespace LP.WXK.K3.App.ServicePlugIn
 {
@@ -40,6 +41,12 @@ namespace LP.WXK.K3.App.ServicePlugIn
                         lcbm = GetLCBM(this.Context, tableName, payId);
                     }
 
+                    // 检查是否已同步成功
+                    if (IsAlreadySynced(this.Context, tableName, payId))
+                    {
+                        throw new Exception("单据已成功同步OA，不需要再次同步");
+                    }
+
                     bool isSync = oASync.skipCurrentCodeAsync(this.Context, lcbm);
                     // F_TWLG_OAStatus = 0（未反写）、1（已处理）
                     if (isSync)
@@ -54,6 +61,36 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 检查单据是否已同步成功
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="tableName">表名</param>
+        /// <param name="billId">单据ID</param>
+        /// <returns>是否已同步成功</returns>
+        private bool IsAlreadySynced(Context ctx, string tableName, long billId)
+        {
+            try
+            {
+                string sql = string.Format("SELECT F_TWLG_OAStatus FROM {0} WHERE FID = {1}", tableName, billId);
+                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                {
+                    if (reader.Read())
+                    {
+                        object status = reader["F_TWLG_OAStatus"];
+                        if (status != null && status != DBNull.Value)
+                        {
+                            return Convert.ToInt32(status) == 1;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return false;
         }
 
         private string GetLCBM(Context ctx, string tableName, long billId)

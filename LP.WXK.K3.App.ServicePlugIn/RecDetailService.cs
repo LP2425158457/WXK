@@ -37,101 +37,158 @@ namespace LP.WXK.K3.App.RecDetailSyncSchedule
             httpClient = httpClient ?? new HttpClient();
         }
 
-        public bool syncBill(Context context, long billId)
+        public bool syncBill(Context context, string billNo)
         {
-            // restful接口url
-            var request = new HttpRequestMessage(HttpMethod.Post, url);
+            bool isSuccess = false;
+            string requestContent = "";
+            string responseContent = "";
 
-            // 当前日期
-            string currentDate = GetCurrentDate();
-            // 当前时间
-            string currentTime = GetCurrentTime();
-            // 获取时间戳
-            string currentTimeTamp = GetTimestamp();
-
-            var paramDatajson = new Dictionary<string, object>();
-
-            // 构建header
-            var header = new Dictionary<string, string>();
-            header["systemid"] = systemid;
-            header["currentDateTime"] = currentTimeTamp;
-            string md5Source = systemid + d_password + currentTimeTamp;
-            string md5OfStr = GetMD5Str(md5Source).ToLower();
-            // Md5是：系统标识+密码+时间戳 并且md5加密的结果
-            header["Md5"] = md5OfStr;
-
-            // 构建operationinfo参数
-            var operationinfo = new JObject();
-            operationinfo["operationDate"] = currentDate;
-            operationinfo["operator"] = operatorId;
-            operationinfo["operationTime"] = currentTime;
-
-            // 构建mainTable
-            var mainTable = getMainTableById(context, billId);
-
-            // 构建 detail1 中的 operate
-            var operate = new JObject();
-            operate.Add("action", "SaveOrUpdate");
-
-            // 构建 detail1 的 data（空对象）
-            var data = new JObject();
-
-            // 构建 detail1 数组
-            var detail1List = new JArray();
-            detail1List.Add(new JObject()
+            try
             {
-                { "operate", operate },
-                { "data", data }
-            });
+                // restful接口url
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
 
-            // 构建 data 数组中的第一个元素
-            var dataItem = new JObject();
-            dataItem.Add("operationinfo", operationinfo);
-            dataItem.Add("mainTable", mainTable);
-            dataItem.Add("detail1", detail1List);
+                // 当前日期
+                string currentDate = GetCurrentDate();
+                // 当前时间
+                string currentTime = GetCurrentTime();
+                // 获取时间戳
+                string currentTimeTamp = GetTimestamp();
 
-            // 构建 data 数组
-            var dataArray = new JArray();
-            dataArray.Add(dataItem);
+                var paramDatajson = new Dictionary<string, object>();
 
-            // 将 data 和 header 添加到根对象
-            paramDatajson.Add("data", dataArray);
-            paramDatajson.Add("header", header);
+                // 构建header
+                var header = new Dictionary<string, string>();
+                header["systemid"] = systemid;
+                header["currentDateTime"] = currentTimeTamp;
+                string md5Source = systemid + d_password + currentTimeTamp;
+                string md5OfStr = GetMD5Str(md5Source).ToLower();
+                // Md5是：系统标识+密码+时间戳 并且md5加密的结果
+                header["Md5"] = md5OfStr;
 
+                // 构建operationinfo参数
+                var operationinfo = new JObject();
+                operationinfo["operationDate"] = currentDate;
+                operationinfo["operator"] = operatorId;
+                operationinfo["operationTime"] = currentTime;
 
-            Console.WriteLine("===请求参数datajson===" + JsonConvert.SerializeObject(paramDatajson));
-            var paramsDict = new Dictionary<string, string>();
-            paramsDict["datajson"] = JsonConvert.SerializeObject(paramDatajson);
+                // 构建mainTable
+                var mainTable = getMainTableById(context, billNo);
 
-            // 设置请求头
-            // request.Headers.Add("Content-Type", "application/x-www-form-urlencoded; charset=utf-8");
+                // 构建 detail1 中的 operate
+                var operate = new JObject();
+                operate.Add("action", "SaveOrUpdate");
 
-            // 创建表单内容
-            var formParams = new List<KeyValuePair<string, string>>();
-            foreach (var param in paramsDict)
-            {
-                formParams.Add(new KeyValuePair<string, string>(param.Key, param.Value));
-            }
+                // 构建 detail1 的 data（空对象）
+                var data = new JObject();
 
-            request.Content = new FormUrlEncodedContent(formParams);
-
-            // 发送请求
-            using (HttpResponseMessage response = httpClient.SendAsync(request).GetAwaiter().GetResult())
-            {
-                using (HttpContent content = response.Content)
+                // 构建 detail1 数组
+                var detail1List = new JArray();
+                detail1List.Add(new JObject()
                 {
-                    var responseContent = content.ReadAsStringAsync().GetAwaiter().GetResult();
-                    JSONObject json = JSONObject.Parse(responseContent);
+                    { "operate", operate },
+                    { "data", data }
+                });
 
-                    // todo这里处理返回信息
-                    Console.WriteLine("成功" + json);
+                // 构建 data 数组中的第一个元素
+                var dataItem = new JObject();
+                dataItem.Add("operationinfo", operationinfo);
+                dataItem.Add("mainTable", mainTable);
+                dataItem.Add("detail1", detail1List);
 
+                // 构建 data 数组
+                var dataArray = new JArray();
+                dataArray.Add(dataItem);
+
+                // 将 data 和 header 添加到根对象
+                paramDatajson.Add("data", dataArray);
+                paramDatajson.Add("header", header);
+
+                requestContent = JsonConvert.SerializeObject(paramDatajson);
+                var paramsDict = new Dictionary<string, string>();
+                paramsDict["datajson"] = requestContent;
+
+                // 创建表单内容
+                var formParams = new List<KeyValuePair<string, string>>();
+                foreach (var param in paramsDict)
+                {
+                    formParams.Add(new KeyValuePair<string, string>(param.Key, param.Value));
+                }
+
+                request.Content = new FormUrlEncodedContent(formParams);
+
+                // 发送请求
+                using (HttpResponseMessage response = httpClient.SendAsync(request).GetAwaiter().GetResult())
+                {
+                    using (HttpContent content = response.Content)
+                    {
+                        responseContent = content.ReadAsStringAsync().GetAwaiter().GetResult();
+                        JSONObject json = JSONObject.Parse(responseContent);
+
+                        // 处理返回信息
+                        if (json.ContainsKey("code"))
+                        {
+                            string code = Convert.ToString(json["code"]);
+                            isSuccess = "success".Equals(code, StringComparison.OrdinalIgnoreCase) ||
+                                        "200".Equals(code);
+                        }
+                    }
                 }
             }
-            return true;
+            catch (Exception ex)
+            {
+                responseContent = $"Exception: {ex.Message}";
+            }
+            finally
+            {
+                saveOALog(context, billNo, requestContent, responseContent, isSuccess);
+            }
+
+            return isSuccess;
         }
 
-        private JObject getMainTableById(Context context, long billId)
+        /// <summary>
+        /// 保存OA日志
+        /// </summary>
+        /// <param name="context">上下文</param>
+        /// <param name="number">单据编号</param>
+        /// <param name="req">请求内容</param>
+        /// <param name="resp">响应内容</param>
+        /// <param name="isSuccess">是否成功</param>
+        private void saveOALog(Context context, string number, string req, string resp, bool isSuccess)
+        {
+            try
+            {
+                IMetaDataService metadataService = ServiceHelper.GetService<IMetaDataService>();
+                FormMetadata meta = metadataService.Load(context, "TWLG_OASyncLog") as FormMetadata;
+
+                if (meta == null)
+                {
+                    return;
+                }
+
+                ISaveService saveService = ServiceHelper.GetService<ISaveService>();
+
+                DynamicObject oaSyncLog = meta.BusinessInfo.GetDynamicObjectType().CreateInstance() as DynamicObject;
+                if (oaSyncLog != null)
+                {
+                    oaSyncLog["BillNo"] = number;
+                    oaSyncLog["TWLG_Request"] = req;
+                    oaSyncLog["TWLG_Response"] = resp;
+                    oaSyncLog["TWLG_Success"] = isSuccess;
+                    oaSyncLog["TWLG_CreateDate"] = DateTime.Now;
+                    oaSyncLog["TWLG_SyncDate"] = DateTime.Now;
+
+                    DynamicObject[] objects = new DynamicObject[] { oaSyncLog };
+                    saveService.Save(context, objects);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private JObject getMainTableById(Context context, string billNo)
         {
             var mainTable = new JObject();
             // 获取元数据服务
@@ -140,14 +197,9 @@ namespace LP.WXK.K3.App.RecDetailSyncSchedule
             // 获取查看服务
             IViewService viewService = ServiceHelper.GetService<IViewService>();
 
-            // 构建过滤条件
-            /*QueryBuilderParemeter queryParameter = new QueryBuilderParemeter();
-            queryParameter.BusinessInfo = meta.BusinessInfo;
-            queryParameter.FilterClauseWihtKey = "BillNo = " + billId;*/
-
             // 构建快捷过滤条件
             OQLFilter filter = new OQLFilter();
-            filter.Add(new OQLFilterHeadEntityItem() { FilterString = "FSETTLENO = " + billId });
+            filter.Add(new OQLFilterHeadEntityItem() { FilterString = $"FBILLNO = '{billNo}'" });
 
             // 构建关心的字段片段信息
             List<SelectorItemInfo> selectors = new List<SelectorItemInfo>();
