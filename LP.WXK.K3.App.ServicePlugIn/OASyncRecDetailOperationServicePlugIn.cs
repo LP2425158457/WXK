@@ -1,4 +1,4 @@
-using Kingdee.BOS.Core.DynamicForm.PlugIn;
+﻿using Kingdee.BOS.Core.DynamicForm.PlugIn;
 using System;
 using System.ComponentModel;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
@@ -11,7 +11,7 @@ using Kingdee.BOS.Util;
 
 namespace LP.WXK.K3.App.ServicePlugIn
 {
-    [Description("【服务插件】测试:ERP银行交易明细传输至OA回款明细（需设置过滤条件或人工选择标记）"), HotUpdate]
+    [Description("【操作插件】测试:ERP银行交易明细传输至OA回款明细（需设置过滤条件或人工选择标记）"), HotUpdate]
     public class OASyncRecDetailOperationServicePlugIn : AbstractOperationServicePlugIn
     {
 

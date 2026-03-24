@@ -10,7 +10,7 @@ using Kingdee.BOS;
 
 namespace LP.WXK.K3.App.ServicePlugIn
 {
-    [Description("【服务插件】付款单、收款退款单的“已付款确认”增加插件，调用OA同步；并写入日志；"), HotUpdate]
+    [Description("【操作插件】付款单、收款退款单的“已付款确认”增加插件，调用OA同步；并写入日志；"), HotUpdate]
     public class OASyncOperationServicePlugIn : AbstractOperationServicePlugIn
     {
 
@@ -38,7 +38,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     else if (typeName.Equals("REFUNDBILL"))
                     {   // 收款退款单
                         tableName = "T_AR_REFUNDBILL";
-                        lcbm = GetLCBM(this.Context, tableName, payId);
+                        lcbm = GetNOTE(this.Context, tableName, payId);
                     }
 
                     // 检查是否已同步成功
@@ -104,6 +104,26 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     if (reader.Read())
                     {
                         lcbm = Convert.ToString(reader["F_TWLG_LCBM"]) ?? "";
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return lcbm;
+        }
+
+        private string GetNOTE(Context ctx, string tableName, long billId)
+        {
+            string lcbm = "";
+            try
+            {
+                string sql = string.Format("SELECT FNOTE FROM {0} WHERE FID = {1}", tableName, billId);
+                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                {
+                    if (reader.Read())
+                    {
+                        lcbm = Convert.ToString(reader["FNOTE"]) ?? "";
                     }
                 }
             }

@@ -1,4 +1,4 @@
-using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
+﻿using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
 using Kingdee.BOS.Core.Metadata;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.App.Data;
