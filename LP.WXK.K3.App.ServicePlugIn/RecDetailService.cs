@@ -254,8 +254,14 @@ namespace LP.WXK.K3.App.RecDetailSyncSchedule
             mainTable.Add("wwcwhdbs", "0");
             mainTable.Add("wwcwhdsj", "2025-12-22 19:18:00");
             DynamicObject payUnit = (DynamicObject)obj["FPAYUNIT"];
-            mainTable.Add("sybm", Convert.ToString(payUnit["Number"]));
-            mainTable.Add("symc", Convert.ToString(payUnit["Name"]));
+            if(payUnit != null)
+            {
+                mainTable.Add("sybm", Convert.ToString(payUnit["Number"]));
+                mainTable.Add("symc", Convert.ToString(payUnit["Name"]));
+            }else {
+                mainTable.Add("sybm", "");
+                mainTable.Add("symc", "");
+            }
             mainTable.Add("zh01", "");
             mainTable.Add("zhmc02", "1");
             mainTable.Add("zhmc01", "1");

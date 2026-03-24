@@ -26,6 +26,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                 if (entity != null)
                 {
                     long payId = Convert.ToInt64(entity["Id"]);
+                    string billNo = Convert.ToString(entity["BillNo"]);
                     var typeName = entity.DynamicObjectType.Name;
                     var tableName = "";
                     string lcbm = "";
@@ -45,6 +46,12 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     if (IsAlreadySynced(this.Context, tableName, payId))
                     {
                         throw new Exception("单据已成功同步OA，不需要再次同步");
+                    }
+
+                    // 检查流程编码是否为空
+                    if (string.IsNullOrWhiteSpace(lcbm))
+                    {
+                        throw new Exception($"所选单据：{billNo} 不存在OA流程ID，不允许推送！");
                     }
 
                     bool isSync = oASync.skipCurrentCodeAsync(this.Context, lcbm);
@@ -118,12 +125,12 @@ namespace LP.WXK.K3.App.ServicePlugIn
             string lcbm = "";
             try
             {
-                string sql = string.Format("SELECT FNOTE FROM {0} WHERE FID = {1}", tableName, billId);
+                string sql = string.Format("SELECT FREMARK FROM {0} WHERE FID = {1}", tableName, billId);
                 using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
                 {
                     if (reader.Read())
                     {
-                        lcbm = Convert.ToString(reader["FNOTE"]) ?? "";
+                        lcbm = Convert.ToString(reader["FREMARK"]) ?? "";
                     }
                 }
             }
