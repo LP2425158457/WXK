@@ -38,6 +38,8 @@ namespace LP.WXK.K3.App.ServicePlugIn
         /// <param name="oASync">OA同步服务</param>
         private void ProcessPayBill(Context ctx, OASyncService oASync)
         {
+            // 查询条件：银行处理状态=已付款确认
+            // 状态：0-未同步，1-已同步，2-同步失败，3-已排除
             string sql = @"
                 SELECT DISTINCT a.FID, a.F_TWLG_LCBM
                 FROM T_AP_PAYBILL a
@@ -56,8 +58,11 @@ namespace LP.WXK.K3.App.ServicePlugIn
         /// <param name="oASync">OA同步服务</param>
         private void ProcessRefundBill(Context ctx, OASyncService oASync)
         {
+            // 查询条件：银行处理状态=已付款确认
+            // 状态：0-未同步，1-已同步，2-同步失败，3-已排除
+            // 收款退款单使用FREMARK字段存储流程编码
             string sql = @"
-                SELECT DISTINCT a.FID, a.F_TWLG_LCBM
+                SELECT DISTINCT a.FID, a.FREMARK
                 FROM T_AR_REFUNDBILL a
                 INNER JOIN T_AR_REFUNDBILLENTRY_B b ON a.FID = b.FID
                 WHERE (a.F_TWLG_OAStatus = 0 OR a.F_TWLG_OAStatus = 2 OR a.F_TWLG_OAStatus IS NULL)
@@ -85,7 +90,16 @@ namespace LP.WXK.K3.App.ServicePlugIn
                         try
                         {
                             long billId = Convert.ToInt64(reader["FID"]);
-                            string lcbm = Convert.ToString(reader["F_TWLG_LCBM"]);
+                            // 付款单使用F_TWLG_LCBM，收款退款单使用FREMARK
+                            string lcbmFieldName = tableName == "T_AR_REFUNDBILL" ? "FREMARK" : "F_TWLG_LCBM";
+                            string lcbm = Convert.ToString(reader[lcbmFieldName]);
+
+                            // 检查流程编码是否为空
+                            if (string.IsNullOrWhiteSpace(lcbm))
+                            {
+                                continue;
+                            }
+
                             bool isSync = oASync.skipCurrentCodeAsync(ctx, lcbm);
 
                             string updateSql;
@@ -103,8 +117,12 @@ namespace LP.WXK.K3.App.ServicePlugIn
                             }
                             DBUtils.Execute(ctx, updateSql);
                         }
-                        catch (Exception ex)
+                        catch (Exception)
                         {
+                            string updateSql = string.Format(
+                                "UPDATE {0} SET F_TWLG_OAStatus = 2 WHERE FID = {1}",
+                                tableName, billId);
+                            DBUtils.Execute(ctx, updateSql);
                             continue;
                         }
                     }

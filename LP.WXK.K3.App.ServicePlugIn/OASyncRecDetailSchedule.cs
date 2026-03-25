@@ -1,4 +1,4 @@
-﻿using Kingdee.BOS;
+using Kingdee.BOS;
 using Kingdee.BOS.Contracts;
 using Kingdee.BOS.Core;
 using Kingdee.BOS.App.Data;
@@ -130,6 +130,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                         }
                         catch (Exception)
                         {
+                            UpdateSyncStatus(ctx, billId, 2);
                             continue;
                         }
                     }
