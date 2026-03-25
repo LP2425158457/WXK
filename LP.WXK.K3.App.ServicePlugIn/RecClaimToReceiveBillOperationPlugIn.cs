@@ -33,7 +33,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         /// <summary>
         /// 转换规则ID
         /// </summary>
-        private const string CONVERT_RULE_ID = "CN_MultiRecClaimBillToRecBill";
+        private const string CONVERT_RULE_ID = "CN_RecClaimBillToRecBill";
 
         /// <summary>
         /// 已确认认领状态
@@ -272,12 +272,30 @@ namespace LP.WXK.K3.App.ServicePlugIn
                 OperateOption saveOption = OperateOption.Create();
                 saveOption.SetIgnoreWarning(true);
 
-                var saveResult = BusinessDataServiceHelper.Save(this.Context, targetBillMeta.BusinessInfo, objs, saveOption, "Save");
+                var saveResult = BusinessDataServiceHelper.Save(this.Context, targetBillMeta.BusinessInfo, objs, saveOption, "Audit");
 
                 if (!saveResult.IsSuccess)
                 {
                     var errorMsg = saveResult.OperateResult.FirstOrDefault()?.Message ?? "保存失败";
                     throw new Exception($"保存收款单失败：{errorMsg}");
+                }
+                // 获取成功保存的单据ID
+                object[] savedBillIds = new object[objs.Length];
+                for (int i = 0; i < objs.Length; i++)
+                {
+                    savedBillIds[i] = objs[i][0];
+                }
+                var submitResult = BusinessDataServiceHelper.Submit(this.Context, targetBillMeta.BusinessInfo, savedBillIds, "Submit", saveOption);
+                if (!submitResult.IsSuccess)
+                {
+                    var errorMsg = submitResult.OperateResult.FirstOrDefault()?.Message ?? "提交失败";
+                    throw new Exception($"提交收款单失败：{errorMsg}");
+                }
+                var applyResult = BusinessDataServiceHelper.Audit(this.Context, targetBillMeta.BusinessInfo, savedBillIds, saveOption);
+                if (!applyResult.IsSuccess)
+                {
+                    var errorMsg = applyResult.OperateResult.FirstOrDefault()?.Message ?? "审核失败";
+                    throw new Exception($"审核收款单失败：{errorMsg}");
                 }
             }
             catch (Exception ex)

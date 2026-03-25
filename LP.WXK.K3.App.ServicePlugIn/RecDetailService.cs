@@ -132,6 +132,12 @@ namespace LP.WXK.K3.App.RecDetailSyncSchedule
                             isSuccess = "success".Equals(code, StringComparison.OrdinalIgnoreCase) ||
                                         "200".Equals(code);
                         }
+                        else if (json.ContainsKey("status"))
+                        {
+                            string status = Convert.ToString(json["status"]);
+                            isSuccess = "1".Equals(status) || "success".Equals(status, StringComparison.OrdinalIgnoreCase);
+                        }
+
                     }
                 }
             }
@@ -142,6 +148,12 @@ namespace LP.WXK.K3.App.RecDetailSyncSchedule
             finally
             {
                 saveOALog(context, billNo, requestContent, responseContent, isSuccess);
+            }
+
+            // 同步失败则抛出异常
+            if (!isSuccess)
+            {
+                throw new Exception($"同步收款单失败：{responseContent}");
             }
 
             return isSuccess;
@@ -254,11 +266,13 @@ namespace LP.WXK.K3.App.RecDetailSyncSchedule
             mainTable.Add("wwcwhdbs", "0");
             mainTable.Add("wwcwhdsj", "2025-12-22 19:18:00");
             DynamicObject payUnit = (DynamicObject)obj["FPAYUNIT"];
-            if(payUnit != null)
+            if (payUnit != null)
             {
                 mainTable.Add("sybm", Convert.ToString(payUnit["Number"]));
                 mainTable.Add("symc", Convert.ToString(payUnit["Name"]));
-            }else {
+            }
+            else
+            {
                 mainTable.Add("sybm", "");
                 mainTable.Add("symc", "");
             }
