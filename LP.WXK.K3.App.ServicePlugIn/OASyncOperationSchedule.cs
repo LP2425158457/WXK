@@ -87,12 +87,12 @@ namespace LP.WXK.K3.App.ServicePlugIn
                 {
                     while (reader.Read())
                     {
+                        long billId = Convert.ToInt64(reader["FID"]);
+                        // 付款单使用F_TWLG_LCBM，收款退款单使用FREMARK
+                        string lcbmFieldName = tableName == "T_AR_REFUNDBILL" ? "FREMARK" : "F_TWLG_LCBM";
+                        string lcbm = Convert.ToString(reader[lcbmFieldName]);
                         try
                         {
-                            long billId = Convert.ToInt64(reader["FID"]);
-                            // 付款单使用F_TWLG_LCBM，收款退款单使用FREMARK
-                            string lcbmFieldName = tableName == "T_AR_REFUNDBILL" ? "FREMARK" : "F_TWLG_LCBM";
-                            string lcbm = Convert.ToString(reader[lcbmFieldName]);
 
                             // 检查流程编码是否为空
                             if (string.IsNullOrWhiteSpace(lcbm))

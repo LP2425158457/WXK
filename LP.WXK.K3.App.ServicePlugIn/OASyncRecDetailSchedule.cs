@@ -1,4 +1,4 @@
-using Kingdee.BOS;
+﻿using Kingdee.BOS;
 using Kingdee.BOS.Contracts;
 using Kingdee.BOS.Core;
 using Kingdee.BOS.App.Data;
@@ -95,10 +95,10 @@ namespace LP.WXK.K3.App.ServicePlugIn
                 {
                     while (reader.Read())
                     {
+                        long billId = Convert.ToInt64(reader["FID"]);
+                        string billNo = Convert.ToString(reader["FBILLNO"]);
                         try
                         {
-                            long billId = Convert.ToInt64(reader["FID"]);
-                            string billNo = Convert.ToString(reader["FBILLNO"]);
                             string summary = Convert.ToString(reader["FEXPLANATION"]) ?? "";
                             string oppAccountName = Convert.ToString(reader["FOppBankAcntName"]) ?? "";
 
