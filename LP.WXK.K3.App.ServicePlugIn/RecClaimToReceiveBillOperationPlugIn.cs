@@ -1,4 +1,4 @@
-﻿using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
+﻿﻿using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
 using Kingdee.BOS.Core.Metadata;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.App.Data;
@@ -23,8 +23,8 @@ namespace LP.WXK.K3.App.ServicePlugIn
         /// <summary>
         /// 收款认领单表单ID
         /// </summary>
-        private const string SOURCE_FORMID = "CN_RECCLAIMBILL";
-
+        private const string SOURCE_FORMID = "CN_RECCLAIMBIL";
+        
         /// <summary>
         /// 收款单单据ID
         /// </summary>

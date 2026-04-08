@@ -1,14 +1,15 @@
 /* =============================================
    收款单信息视图
    功能：取收款单列表信息
-   字段：单据编号、收款用途、业务日期、收款金额、付款单位
+   字段：单据编号、收款用途、业务日期、收款金额、付款单位、付款单位编码、使用组织、收款单明细物料信息
    创建日期：2026-03-17
+   修改日期：2026-04-09
    ============================================= */
 
 CREATE OR ALTER VIEW V_RECEIVEBILL_INFO AS
 
 SELECT DISTINCT
-    CONCAT(h.FID, p.FID) AS PKID,
+    CONCAT(h.FID, p.FID, m.FMATERIALID) AS PKID,
     h.FBILLNO AS 单据编号,
     pl.FNAME AS 收款用途,
     CONVERT(varchar(10), h.FDATE, 120) AS 业务日期,
@@ -34,7 +35,9 @@ SELECT DISTINCT
         ELSE ''
     END AS 付款单位编码,
     orguse_l.FNAME AS 使用组织,
-    orguse.FNUMBER AS 使用组织编码
+    orguse.FNUMBER AS 使用组织编码,
+    m_l.FNAME AS 物料名称,
+    m.FNUMBER AS 物料编码
 FROM T_AR_RECEIVEBILL h
 LEFT JOIN T_AR_RECEIVEBILLENTRY e ON h.FID = e.FID
 LEFT JOIN T_CN_RECPAYPURPOSE p ON e.FPURPOSEID = p.FID
@@ -55,13 +58,15 @@ LEFT JOIN T_BD_BANK bank ON h.FPAYUNIT = bank.FBANKID AND h.FPAYUNITTYPE = 'BD_B
 LEFT JOIN T_BD_BANK_L b ON h.FPAYUNIT = b.FBANKID AND h.FPAYUNITTYPE = 'BD_BANK' AND b.FLOCALEID = 2052
 LEFT JOIN T_ORG_ORGANIZATIONS orguse ON h.FPAYORGID = orguse.FORGID
 LEFT JOIN T_ORG_ORGANIZATIONS_L orguse_l ON h.FPAYORGID = orguse_l.FORGID AND orguse_l.FLOCALEID = 2052
+LEFT JOIN T_BD_MATERIAL m ON e.FMATERIALID = m.FMATERIALID
+LEFT JOIN T_BD_MATERIAL_L m_l ON e.FMATERIALID = m_l.FMATERIALID AND m_l.FLOCALEID = 2052
 
 
 
 GO
 
 /* 视图说明：
-   1. PKID：主键ID，由单据头ID和收款用途ID拼接而成
+   1. PKID：主键ID，由单据头ID、收款用途ID、物料ID拼接而成
       - 使用 DISTINCT 关键字去除重复数据
       - 当所有查询字段值完全相同时，只保留一条记录
    2. 单据编号：来自收款单单据头表 T_AR_RECEIVEBILL
@@ -75,5 +80,9 @@ GO
    8. 使用组织：来自收款单单据头表，关联组织基础资料表
       - T_ORG_ORGANIZATIONS：组织主表
       - T_ORG_ORGANIZATIONS_L：组织多语言表
-   9. 多语言表FLOCALEID = 2052 表示中文
+   9. 物料名称：来自收款单明细表，关联物料基础资料表
+      - T_BD_MATERIAL：物料主表
+      - T_BD_MATERIAL_L：物料多语言表
+   10. 物料编码：来自物料主表 T_BD_MATERIAL
+   11. 多语言表FLOCALEID = 2052 表示中文
 */
