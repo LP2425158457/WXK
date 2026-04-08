@@ -1,4 +1,4 @@
-﻿using Kingdee.BOS;
+using Kingdee.BOS;
 using Kingdee.BOS.Contracts;
 using Kingdee.BOS.Core;
 using Kingdee.BOS.App.Data;
@@ -86,10 +86,16 @@ namespace LP.WXK.K3.App.ServicePlugIn
             try
             {
                 string sql = @"
-                    SELECT FID, FBILLNO, FEXPLANATION, FOppBankAcntName 
-                    FROM T_CN_BANKCASHFLOW 
-                    WHERE F_TWLG_OASyncStatus = 0 
-                      AND FDOCUMENTSTATUS = 'C'";
+                    SELECT h.FID, h.FBILLNO, h.FEXPLANATION, h.FOppBankAcntName
+                    FROM T_CN_BANKCASHFLOW h
+                    WHERE h.F_TWLG_OASyncStatus = 0
+                      AND h.FDOCUMENTSTATUS = 'C'
+                      AND h.FCREDITAMOUNT > 0
+                      AND NOT EXISTS (
+                          SELECT 1 FROM T_CN_RECCLAIMBILLENTRY e
+                          INNER JOIN T_CN_RECCLAIMBILL c ON e.FID = c.FID
+                          WHERE e.FBNKSEQNO = h.FSETTLENO AND c.FDOCUMENTSTATUS = 'C'
+                      )";
 
                 using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
                 {

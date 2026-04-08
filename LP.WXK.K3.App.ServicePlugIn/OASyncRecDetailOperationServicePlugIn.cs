@@ -1,4 +1,4 @@
-﻿using Kingdee.BOS.Core.DynamicForm.PlugIn;
+using Kingdee.BOS.Core.DynamicForm.PlugIn;
 using System;
 using System.ComponentModel;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
@@ -20,13 +20,27 @@ namespace LP.WXK.K3.App.ServicePlugIn
         {
             base.AfterExecuteOperationTransaction(e);
             RecDetailService recDetailSync = new RecDetailService();
-            // 读取全部的单据,for循环,转换成DynamicObject类型
             foreach (DynamicObject entity in e.DataEntitys)
             {
                 if (entity != null)
                 {
                     string billNo = Convert.ToString(entity["BillNo"]);
+                    long billId = Convert.ToInt64(entity["Id"]);
                     var tableName = "T_CN_BANKCASHFLOW";
+
+                    // 检查贷方金额是否大于0
+                    decimal creditAmount = GetCreditAmount(this.Context, billId);
+                    if (creditAmount <= 0)
+                    {
+                        throw new Exception($"银行交易明细 {billNo} 贷方金额为0，不允许推送OA！");
+                    }
+
+                    // 检查交易流水号是否已关联收款认领单
+                    string bankSeqNo = GetBankSeqNo(this.Context, billId);
+                    if (IsBankSeqNoAssociated(this.Context, bankSeqNo))
+                    {
+                        throw new Exception($"银行交易明细 {billNo} 的交易流水号 {bankSeqNo} 已关联收款认领单，不允许重复推送！");
+                    }
 
                     // 检查是否已同步成功
                     if (IsAlreadySynced(this.Context, tableName, billNo))
@@ -72,6 +86,86 @@ namespace LP.WXK.K3.App.ServicePlugIn
                             return Convert.ToInt32(status) == 1;
                         }
                     }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 获取贷方金额
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="billId">单据ID</param>
+        /// <returns>贷方金额</returns>
+        private decimal GetCreditAmount(Context ctx, long billId)
+        {
+            try
+            {
+                string sql = string.Format("SELECT FCREDITAMOUNT FROM T_CN_BANKCASHFLOW WHERE FID = {0}", billId);
+                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                {
+                    if (reader.Read())
+                    {
+                        return Convert.ToDecimal(reader["FCREDITAMOUNT"]);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return 0;
+        }
+
+        /// <summary>
+        /// 获取交易流水号
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="billId">单据ID</param>
+        /// <returns>交易流水号</returns>
+        private string GetBankSeqNo(Context ctx, long billId)
+        {
+            try
+            {
+                string sql = string.Format("SELECT FSETTLENO FROM T_CN_BANKCASHFLOW WHERE FID = {0}", billId);
+                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                {
+                    if (reader.Read())
+                    {
+                        return Convert.ToString(reader["FSETTLENO"]) ?? "";
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return "";
+        }
+
+        /// <summary>
+        /// 检查交易流水号是否已关联收款认领单
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="bankSeqNo">交易流水号</param>
+        /// <returns>是否已关联</returns>
+        private bool IsBankSeqNoAssociated(Context ctx, string bankSeqNo)
+        {
+            if (string.IsNullOrWhiteSpace(bankSeqNo))
+            {
+                return false;
+            }
+            try
+            {
+                string sql = string.Format(@"
+                    SELECT 1 FROM T_CN_RECCLAIMBILLENTRY e
+                    INNER JOIN T_CN_RECCLAIMBILL c ON e.FID = c.FID
+                    WHERE e.FBNKSEQNO = '{0}' AND c.FDOCUMENTSTATUS = 'C'",
+                    bankSeqNo.Replace("'", "''"));
+                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                {
+                    return reader.Read();
                 }
             }
             catch (Exception)
