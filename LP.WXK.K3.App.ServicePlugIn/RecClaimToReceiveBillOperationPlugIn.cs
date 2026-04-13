@@ -12,8 +12,8 @@ using Kingdee.BOS.Core.DynamicForm.Operation;
 using System.Data;
 using Kingdee.BOS.Core.List;
 using Kingdee.BOS.Core.Metadata.ConvertElement.ServiceArgs;
-using Kingdee.BOS.Orm;
 using Kingdee.BOS.ServiceHelper;
+using Kingdee.BOS.Orm;
 
 namespace LP.WXK.K3.App.ServicePlugIn
 {
@@ -53,6 +53,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
 
             if (e.DataEntitys == null || e.DataEntitys.Length == 0)
             {
+                _billIds.Clear();
                 return;
             }
 
@@ -116,6 +117,13 @@ namespace LP.WXK.K3.App.ServicePlugIn
         public override void AfterExecuteOperationTransaction(AfterExecuteOperationTransaction e)
         {
             base.AfterExecuteOperationTransaction(e);
+
+            if (e.DataEntitys == null || e.DataEntitys.Length == 0 || _billIds.Count == 0)
+            {
+                return;
+            }
+
+            PushToReceiveBill(_billIds);
         }
 
         private string GetBillNo(long billId)
@@ -367,7 +375,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         }
 
         /// <summary>
-        /// 执行单据下推，生成收款单
+        /// 执行单据下推，生成收款单（合并同流水全部未下推认领单）
         /// </summary>
         private void PushToReceiveBill(List<long> billIds)
         {
