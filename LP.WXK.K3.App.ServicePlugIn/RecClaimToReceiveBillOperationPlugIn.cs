@@ -1,4 +1,4 @@
-﻿﻿using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
+﻿using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
 using Kingdee.BOS.Core.Metadata;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.App.Data;
@@ -24,7 +24,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         /// 收款认领单表单ID
         /// </summary>
         private const string SOURCE_FORMID = "CN_RECCLAIMBIL";
-        
+
         /// <summary>
         /// 收款单单据ID
         /// </summary>
@@ -39,6 +39,11 @@ namespace LP.WXK.K3.App.ServicePlugIn
         /// 已确认认领状态
         /// </summary>
         private const string BILL_STATUS_CONFIRMED = "C";
+
+        /// <summary>
+        /// 金额比较容差（与标准币别小数位一致，避免浮点/舍入导致误判）
+        /// </summary>
+        private const decimal AmountTolerance = 0.01m;
 
         private List<long> _billIds = new List<long>();
 
@@ -80,10 +85,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                 string bankSeqNo = kvp.Key;
                 List<long> currentBillIds = kvp.Value;
 
-                if (!IsLastClaim(bankSeqNo))
-                {
-                    throw new Exception($"交易流水号 {bankSeqNo} 还有未认完的金额，不是最后一笔认款，不允许下推！");
-                }
+                ValidateLastClaimForBankSeq(bankSeqNo);
 
                 List<long> allBillIds = GetUnpushedClaimBillsByBankSeq(bankSeqNo);
                 foreach (long id in allBillIds)
@@ -116,38 +118,6 @@ namespace LP.WXK.K3.App.ServicePlugIn
             base.AfterExecuteOperationTransaction(e);
         }
 
-        private DynamicObject[] GetDataEntitiesByIds(long[] billIds)
-        {
-            if (billIds == null || billIds.Length == 0)
-            {
-                return new DynamicObject[0];
-            }
-
-            string idsStr = string.Join(",", billIds);
-            string sql = string.Format(@"
-                SELECT h.FID, h.FBILLNO, h.FDocumentStatus
-                FROM T_CN_RECCLAIMBILL h
-                WHERE h.FID IN ({0})", idsStr);
-
-            List<DynamicObject> result = new List<DynamicObject>();
-            try
-            {
-                using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
-                {
-                    while (reader.Read())
-                    {
-                        DynamicObject obj = new DynamicObject();
-                        obj.DynamicObjectType = typeof(DynamicObject);
-                        result.Add(obj);
-                    }
-                }
-            }
-            catch (Exception)
-            {
-            }
-            return result.ToArray();
-        }
-
         private string GetBillNo(long billId)
         {
             try
@@ -168,32 +138,46 @@ namespace LP.WXK.K3.App.ServicePlugIn
         }
 
         /// <summary>
-        /// 检查是否为最后一笔认款（银行流水未认款金额为0）
+        /// 校验该银企流水号是否已认款完毕（最后一笔）。
+        /// 说明：部分环境 T_CN_BANKCASHFLOW 无 FRemainAmt 或该字段未随认领回写，仅用 FRemainAmt 会误判。
+        /// 此处用「银行贷方收款金额 - 同流水号已确认认领单(按单汇总)的已认领金额之和」计算剩余认款。
         /// </summary>
-        /// <param name="bankSeqNo">交易流水号</param>
-        /// <returns>是否为最后一笔</returns>
-        private bool IsLastClaim(string bankSeqNo)
+        private void ValidateLastClaimForBankSeq(string bankSeqNo)
         {
-            try
-            {
-                string sql = string.Format(@"
-                    SELECT FRemainAmt FROM T_CN_BANKCASHFLOW
-                    WHERE FSETTLENO = '{0}'",
-                    bankSeqNo.Replace("'", "''"));
+            string esc = bankSeqNo.Replace("'", "''");
+            string sql = string.Format(@"
+                SELECT TOP 1
+                    b.FCREDITAMOUNT,
+                    ISNULL((
+                        SELECT SUM(t.FCLAIMAMOUNT)
+                        FROM (
+                            SELECT DISTINCT h.FID, h.FCLAIMAMOUNT
+                            FROM T_CN_RECCLAIMBILL h
+                            INNER JOIN T_CN_RECCLAIMBILLENTRY e ON h.FID = e.FID
+                            WHERE e.FBNKSEQNO = b.FSETTLENO AND h.FDOCUMENTSTATUS = N'C'
+                        ) t
+                    ), 0) AS ClaimedSum
+                FROM T_CN_BANKCASHFLOW b
+                WHERE b.FSETTLENO = N'{0}'", esc);
 
-                using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
+            using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
+            {
+                if (!reader.Read())
                 {
-                    if (reader.Read())
-                    {
-                        decimal remainAmt = Convert.ToDecimal(reader["FRemainAmt"]);
-                        return remainAmt == 0;
-                    }
+                    throw new Exception(
+                        $"交易流水号 {bankSeqNo} 在银行交易明细中未找到（请核对认领单分录「交易流水号」是否与银行明细「银企流水号 FSETTLENO」完全一致，含空格）。");
+                }
+
+                decimal creditAmount = Convert.ToDecimal(reader["FCREDITAMOUNT"]);
+                decimal claimedSum = Convert.ToDecimal(reader["ClaimedSum"]);
+                decimal remain = creditAmount - claimedSum;
+
+                if (Math.Abs(remain) > AmountTolerance)
+                {
+                    throw new Exception(
+                        $"交易流水号 {bankSeqNo} 还有未认完的金额（银行收款 {creditAmount}，已确认认领合计 {claimedSum}，剩余约 {remain}），不是最后一笔认款，不允许下推！");
                 }
             }
-            catch (Exception)
-            {
-            }
-            return false;
         }
 
         /// <summary>
@@ -420,7 +404,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                 }
 
                 DynamicObject[] objs = (from p in operationResult.TargetDataEntities
-                                         select p.DataEntity).ToArray();
+                                        select p.DataEntity).ToArray();
 
                 if (objs == null || objs.Length == 0)
                 {
