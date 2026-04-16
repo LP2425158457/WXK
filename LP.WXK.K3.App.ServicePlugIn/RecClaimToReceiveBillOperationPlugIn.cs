@@ -5,6 +5,7 @@ using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Util;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.ComponentModel;
 using Kingdee.BOS.Core.DynamicForm.PlugIn;
@@ -17,113 +18,180 @@ using Kingdee.BOS.Orm;
 
 namespace LP.WXK.K3.App.ServicePlugIn
 {
-    [Description("【操作插件】收款认领单下推生成收款单：校验最后一笔认款，自动合并下推"), HotUpdate]
+    [Description("【操作插件】收款认领单保存后自动提交、审核；同批认款齐套时下推合并生成收款单"), HotUpdate]
     public class RecClaimToReceiveBillOperationPlugIn : AbstractOperationServicePlugIn
     {
-        /// <summary>
-        /// 收款认领单表单ID
-        /// </summary>
-        private const string SOURCE_FORMID = "CN_RECCLAIMBIL";
-
-        /// <summary>
-        /// 收款单单据ID
-        /// </summary>
         private const string TARGET_FORMID = "AR_RECEIVEBILL";
 
-        /// <summary>
-        /// 转换规则ID
-        /// </summary>
         private const string CONVERT_RULE_ID = "CN_RecClaimBillToRecBill";
 
         /// <summary>
-        /// 已确认认领状态
-        /// </summary>
-        private const string BILL_STATUS_CONFIRMED = "C";
-
-        /// <summary>
-        /// 金额比较容差（与标准币别小数位一致，避免浮点/舍入导致误判）
+        /// 金额比较容差（与标准币别小数位一致，避免舍入导致误判）
         /// </summary>
         private const decimal AmountTolerance = 0.01m;
 
-        private List<long> _billIds = new List<long>();
-
-        public override void BeginOperationTransaction(BeginOperationTransactionArgs e)
-        {
-            base.BeginOperationTransaction(e);
-
-            if (e.DataEntitys == null || e.DataEntitys.Length == 0)
-            {
-                _billIds.Clear();
-                return;
-            }
-
-            _billIds.Clear();
-            List<string> billNos = new List<string>();
-            Dictionary<string, List<long>> bankSeqToBillIds = new Dictionary<string, List<long>>();
-
-            foreach (DynamicObject billObj in e.DataEntitys)
-            {
-                long billId = Convert.ToInt64(billObj["Id"]);
-                string billNo = Convert.ToString(billObj["BillNo"]);
-                string bankSeqNo = GetBankSeqNo(billId);
-
-                if (string.IsNullOrWhiteSpace(bankSeqNo))
-                {
-                    throw new Exception($"收款认领单 {billNo} 不存在交易流水号，不允许下推！");
-                }
-
-                billNos.Add(billNo);
-
-                if (!bankSeqToBillIds.ContainsKey(bankSeqNo))
-                {
-                    bankSeqToBillIds[bankSeqNo] = new List<long>();
-                }
-                bankSeqToBillIds[bankSeqNo].Add(billId);
-            }
-
-            foreach (var kvp in bankSeqToBillIds)
-            {
-                string bankSeqNo = kvp.Key;
-                List<long> currentBillIds = kvp.Value;
-
-                ValidateLastClaimForBankSeq(bankSeqNo);
-
-                List<long> allBillIds = GetUnpushedClaimBillsByBankSeq(bankSeqNo);
-                foreach (long id in allBillIds)
-                {
-                    if (!_billIds.Contains(id))
-                    {
-                        _billIds.Add(id);
-                    }
-                }
-            }
-
-            foreach (long billId in _billIds)
-            {
-                if (!ValidateBillStatus(billId))
-                {
-                    throw new Exception($"收款认领单 {GetBillNo(billId)} 单据状态不是已审核，不允许下推！");
-                }
-
-                if (ValidateAlreadyPushed(billId))
-                {
-                    throw new Exception($"收款认领单 {GetBillNo(billId)} 已经生成过收款单，不允许重复下推！");
-                }
-            }
-
-            ValidateClaimAmount(_billIds);
-        }
+        /// <summary>
+        /// 已审核（标准单据状态，与原先下推条件一致）
+        /// </summary>
+        private const string DocumentStatusAudited = "C";
 
         public override void AfterExecuteOperationTransaction(AfterExecuteOperationTransaction e)
         {
             base.AfterExecuteOperationTransaction(e);
 
-            if (e.DataEntitys == null || e.DataEntitys.Length == 0 || _billIds.Count == 0)
+            if (e.DataEntitys == null || e.DataEntitys.Length == 0)
             {
                 return;
             }
 
-            PushToReceiveBill(_billIds);
+            if (!IsSaveOperation())
+            {
+                return;
+            }
+
+            List<long> savedBillIds = e.DataEntitys
+                .Where(o => o != null)
+                .Select(o => Convert.ToInt64(o["Id"]))
+                .Distinct()
+                .ToList();
+
+            if (savedBillIds.Count == 0)
+            {
+                return;
+            }
+
+            var formID = this.BusinessInfo.GetForm().Id;
+            string sourceFormId = Convert.ToString(formID);
+            var sourceMeta = MetaDataServiceHelper.Load(this.Context, sourceFormId) as FormMetadata;
+            if (sourceMeta == null)
+            {
+                throw new Exception($"未加载到收款认领单元数据，请检查表单 FormId={sourceFormId}！");
+            }
+
+            OperateOption claimOption = OperateOption.Create();
+            claimOption.SetIgnoreWarning(true);
+
+            foreach (long bid in savedBillIds)
+            {
+                SubmitAndAuditClaimBillIfNeeded(bid, sourceMeta, claimOption);
+            }
+
+            var processedBatchKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (long billId in savedBillIds)
+            {
+                if (!ShouldTryGenerateReceiveBill(billId))
+                {
+                    continue;
+                }
+
+                BatchKey key = TryGetBatchKey(billId);
+                if (key == null)
+                {
+                    continue;
+                }
+
+                string batchKeyStr = key.ToToken();
+                if (processedBatchKeys.Contains(batchKeyStr))
+                {
+                    continue;
+                }
+
+                processedBatchKeys.Add(batchKeyStr);
+
+                List<long> sameBatchIds = GetSameBatchAuditedUnpushedBillIds(key);
+                if (sameBatchIds == null || sameBatchIds.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!TryValidateBatchAmounts(sameBatchIds, key.RecAmount, out _))
+                {
+                    continue;
+                }
+
+                if (sameBatchIds.Any(id => !ShouldTryGenerateReceiveBill(id)))
+                {
+                    continue;
+                }
+
+                PushToReceiveBill(sameBatchIds, sourceFormId);
+            }
+        }
+
+        /// <summary>
+        /// 是否尝试自动下推收款单：有交易流水号且尚未生成收款单。不满足时静默跳过，不影响保存与提交审核。
+        /// </summary>
+        private bool ShouldTryGenerateReceiveBill(long billId)
+        {
+            if (ValidateAlreadyPushed(billId))
+            {
+                return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(GetBankSeqNo(billId));
+        }
+
+        private bool IsSaveOperation()
+        {
+            return this.FormOperation != null
+                && string.Equals(this.FormOperation.Operation, "Save", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string GetDocumentStatus(long billId)
+        {
+            try
+            {
+                string sql = $"SELECT FDocumentStatus FROM T_CN_RECCLAIMBILL WHERE FID = {billId}";
+                using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
+                {
+                    if (reader.Read())
+                    {
+                        return Convert.ToString(reader["FDocumentStatus"]) ?? "";
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return "";
+        }
+
+        /// <summary>
+        /// 保存后尽量将认领单提交并审核到已审核；已为 C 则跳过，为审核中则只尝试审核。
+        /// </summary>
+        private void SubmitAndAuditClaimBillIfNeeded(long billId, FormMetadata sourceMeta, OperateOption opt)
+        {
+            string st = GetDocumentStatus(billId);
+            if (string.Equals(st, DocumentStatusAudited, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            object[] one = new object[] { billId };
+
+            if (!string.Equals(st, "B", StringComparison.OrdinalIgnoreCase))
+            {
+                var submitResult = BusinessDataServiceHelper.Submit(this.Context, sourceMeta.BusinessInfo, one, "Submit", opt);
+                if (!submitResult.IsSuccess)
+                {
+                    var msg = submitResult.OperateResult.FirstOrDefault()?.Message ?? "提交失败";
+                    throw new Exception($"收款认领单 {GetBillNo(billId)} 提交失败：{msg}");
+                }
+            }
+
+            st = GetDocumentStatus(billId);
+            if (string.Equals(st, DocumentStatusAudited, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var auditResult = BusinessDataServiceHelper.Audit(this.Context, sourceMeta.BusinessInfo, one, opt);
+            if (!auditResult.IsSuccess)
+            {
+                var msg = auditResult.OperateResult.FirstOrDefault()?.Message ?? "审核失败";
+                throw new Exception($"收款认领单 {GetBillNo(billId)} 审核失败：{msg}");
+            }
         }
 
         private string GetBillNo(long billId)
@@ -146,96 +214,151 @@ namespace LP.WXK.K3.App.ServicePlugIn
         }
 
         /// <summary>
-        /// 校验该银企流水号是否已认款完毕（最后一笔）。
-        /// 说明：部分环境 T_CN_BANKCASHFLOW 无 FRemainAmt 或该字段未随认领回写，仅用 FRemainAmt 会误判。
-        /// 此处用「银行贷方收款金额 - 同流水号已确认认领单(按单汇总)的已认领金额之和」计算剩余认款。
+        /// 同批维度：流水总金额 + 付款单位 + 收款组织 + 银行账号（流水明细首行）+ 结算方式（流水明细首行，对应业务上的付款/结算方式）
         /// </summary>
-        private void ValidateLastClaimForBankSeq(string bankSeqNo)
+        private BatchKey TryGetBatchKey(long billId)
         {
-            string esc = bankSeqNo.Replace("'", "''");
-            string sql = string.Format(@"
-                SELECT TOP 1
-                    b.FCREDITAMOUNT,
-                    ISNULL((
-                        SELECT SUM(t.FCLAIMAMOUNT)
-                        FROM (
-                            SELECT DISTINCT h.FID, h.FCLAIMAMOUNT
-                            FROM T_CN_RECCLAIMBILL h
-                            INNER JOIN T_CN_RECCLAIMBILLENTRY e ON h.FID = e.FID
-                            WHERE e.FBNKSEQNO = b.FSETTLENO AND h.FDOCUMENTSTATUS = N'C'
-                        ) t
-                    ), 0) AS ClaimedSum
-                FROM T_CN_BANKCASHFLOW b
-                WHERE b.FSETTLENO = N'{0}'", esc);
-
-            using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
+            try
             {
-                if (!reader.Read())
-                {
-                    throw new Exception(
-                        $"交易流水号 {bankSeqNo} 在银行交易明细中未找到（请核对认领单分录「交易流水号」是否与银行明细「银企流水号 FSETTLENO」完全一致，含空格）。");
-                }
+                string sql = string.Format(@"
+SELECT h.FRECAMOUNT, h.FPAYUNIT, h.FRECORGID, e.FACCOUNTID, e.FSETTLETYPEID
+FROM T_CN_RECCLAIMBILL h
+INNER JOIN (
+    SELECT FID, MIN(FENTRYID) AS MinEntryId
+    FROM T_CN_RECCLAIMBILLENTRY
+    GROUP BY FID
+) x ON h.FID = x.FID
+INNER JOIN T_CN_RECCLAIMBILLENTRY e ON e.FENTRYID = x.MinEntryId
+WHERE h.FID = {0}", billId);
 
-                decimal creditAmount = Convert.ToDecimal(reader["FCREDITAMOUNT"]);
-                decimal claimedSum = Convert.ToDecimal(reader["ClaimedSum"]);
-                decimal remain = creditAmount - claimedSum;
-
-                if (Math.Abs(remain) > AmountTolerance)
+                using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
                 {
-                    throw new Exception(
-                        $"交易流水号 {bankSeqNo} 还有未认完的金额（银行收款 {creditAmount}，已确认认领合计 {claimedSum}，剩余约 {remain}），不是最后一笔认款，不允许下推！");
+                    if (!reader.Read())
+                    {
+                        return null;
+                    }
+
+                    return new BatchKey
+                    {
+                        RecAmount = Convert.ToDecimal(reader["FRECAMOUNT"]),
+                        PayUnit = Convert.ToInt32(reader["FPAYUNIT"]),
+                        RecOrgId = Convert.ToInt32(reader["FRECORGID"]),
+                        AccountId = Convert.ToInt32(reader["FACCOUNTID"]),
+                        SettleTypeId = Convert.ToInt32(reader["FSETTLETYPEID"])
+                    };
                 }
+            }
+            catch (Exception)
+            {
+                return null;
             }
         }
 
         /// <summary>
-        /// 根据交易流水号获取所有未下推的收款认领单ID
+        /// 查询与当前单同批、已审核且未生成收款单的认领单。
         /// </summary>
-        /// <param name="bankSeqNo">交易流水号</param>
-        /// <returns>未下推的认领单ID列表</returns>
-        private List<long> GetUnpushedClaimBillsByBankSeq(string bankSeqNo)
+        private List<long> GetSameBatchAuditedUnpushedBillIds(BatchKey key)
         {
-            List<long> billIds = new List<long>();
+            var list = new List<long>();
+            string recAmtStr = key.RecAmount.ToString(CultureInfo.InvariantCulture);
+
+            string sql = string.Format(@"
+SELECT h.FID
+FROM T_CN_RECCLAIMBILL h
+INNER JOIN (
+    SELECT FID, MIN(FENTRYID) AS MinEntryId
+    FROM T_CN_RECCLAIMBILLENTRY
+    GROUP BY FID
+) x ON h.FID = x.FID
+INNER JOIN T_CN_RECCLAIMBILLENTRY e ON e.FENTRYID = x.MinEntryId
+WHERE h.FRECAMOUNT = {0}
+  AND h.FPAYUNIT = {1}
+  AND h.FRECORGID = {2}
+  AND e.FACCOUNTID = {3}
+  AND e.FSETTLETYPEID = {4}
+  AND h.FDocumentStatus = N'{5}'
+  AND NOT EXISTS (
+      SELECT 1 FROM T_AR_RECEIVEBILLSRCENTRY src WHERE src.FSRCBILLID = h.FID
+  )",
+                recAmtStr,
+                key.PayUnit,
+                key.RecOrgId,
+                key.AccountId,
+                key.SettleTypeId,
+                DocumentStatusAudited.Replace("'", "''"));
+
+            using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
+            {
+                while (reader.Read())
+                {
+                    list.Add(Convert.ToInt64(reader["FID"]));
+                }
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 同批内 FRECAMOUNT 一致，且已认领金额之和等于流水总金额。
+        /// </summary>
+        private bool TryValidateBatchAmounts(List<long> billIds, decimal expectedRecAmount, out string error)
+        {
+            error = null;
+            if (billIds == null || billIds.Count == 0)
+            {
+                return false;
+            }
+
             try
             {
-                string sql = string.Format(@"
-                    SELECT DISTINCT h.FID
-                    FROM T_CN_RECCLAIMBILL h
-                    INNER JOIN T_CN_RECCLAIMBILLENTRY e ON h.FID = e.FID
-                    WHERE e.FBNKSEQNO = '{0}'
-                      AND h.FDocumentStatus = 'C'
-                      AND NOT EXISTS (
-                          SELECT 1 FROM T_AR_RECEIVEBILLSRCENTRY src
-                          WHERE src.FSRCBILLID = h.FID
-                      )",
-                    bankSeqNo.Replace("'", "''"));
+                string ids = string.Join(",", billIds);
+                decimal sumClaim = 0m;
+                string sql = string.Format(
+                    "SELECT FCLAIMAMOUNT, FRECAMOUNT FROM T_CN_RECCLAIMBILL WHERE FID IN ({0})",
+                    ids);
 
                 using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
                 {
                     while (reader.Read())
                     {
-                        billIds.Add(Convert.ToInt64(reader["FID"]));
+                        sumClaim += Convert.ToDecimal(reader["FCLAIMAMOUNT"]);
+                        decimal rec = Convert.ToDecimal(reader["FRECAMOUNT"]);
+                        if (Math.Abs(rec - expectedRecAmount) > AmountTolerance)
+                        {
+                            error = "同批单据流水总金额不一致";
+                            return false;
+                        }
                     }
                 }
+
+                if (Math.Abs(sumClaim - expectedRecAmount) > AmountTolerance)
+                {
+                    error = null;
+                    return false;
+                }
+
+                return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                error = ex.Message;
+                return false;
             }
-            return billIds;
         }
 
         /// <summary>
-        /// 获取认领单的交易流水号
+        /// 获取认领单分录上的交易流水号（取首行）
         /// </summary>
         private string GetBankSeqNo(long billId)
         {
             try
             {
                 string sql = string.Format(@"
-                    SELECT e.FBNKSEQNO
-                    FROM T_CN_RECCLAIMBILL h
-                    INNER JOIN T_CN_RECCLAIMBILLENTRY e ON h.FID = e.FID
-                    WHERE h.FID = {0}", billId);
+SELECT TOP 1 e.FBNKSEQNO
+FROM T_CN_RECCLAIMBILL h
+INNER JOIN T_CN_RECCLAIMBILLENTRY e ON h.FID = e.FID
+WHERE h.FID = {0}
+ORDER BY e.FENTRYID", billId);
 
                 using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
                 {
@@ -251,32 +374,6 @@ namespace LP.WXK.K3.App.ServicePlugIn
             return "";
         }
 
-        /// <summary>
-        /// 校验收款认领单单据状态是否为已确认认领
-        /// </summary>
-        private bool ValidateBillStatus(long billId)
-        {
-            try
-            {
-                string sql = $"SELECT FDocumentStatus FROM T_CN_RECCLAIMBILL WHERE FID = {billId}";
-                using (IDataReader reader = DBUtils.ExecuteReader(this.Context, sql))
-                {
-                    if (reader.Read())
-                    {
-                        string status = Convert.ToString(reader["FDocumentStatus"]);
-                        return BILL_STATUS_CONFIRMED.Equals(status, StringComparison.OrdinalIgnoreCase);
-                    }
-                }
-            }
-            catch (Exception)
-            {
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// 校验收款认领单是否已经生成过收款单
-        /// </summary>
         private bool ValidateAlreadyPushed(long billId)
         {
             try
@@ -293,91 +390,29 @@ namespace LP.WXK.K3.App.ServicePlugIn
             return false;
         }
 
-        /// <summary>
-        /// 校验所选收款认领单的认款金额是否等于流水总金额
-        /// </summary>
-        private void ValidateClaimAmount(List<long> billIds)
+        private sealed class BatchKey
         {
-            if (billIds.Count == 0)
-            {
-                return;
-            }
-
-            try
-            {
-                string idsStr = string.Join(",", billIds);
-
-                string bankSeqSql = string.Format(@"
-                    SELECT DISTINCT h.FID, h.FBILLNO, h.FRECAMOUNT, h.FCLAIMAMOUNT, e.FBNKSEQNO
-                    FROM T_CN_RECCLAIMBILL h
-                    INNER JOIN T_CN_RECCLAIMBILLENTRY e ON h.FID = e.FID
-                    WHERE h.FID IN ({0})", idsStr);
-
-                Dictionary<string, List<ClaimBillInfo>> batchDict = new Dictionary<string, List<ClaimBillInfo>>();
-
-                using (IDataReader reader = DBUtils.ExecuteReader(this.Context, bankSeqSql))
-                {
-                    while (reader.Read())
-                    {
-                        string billNo = Convert.ToString(reader["FBILLNO"]);
-                        string bankSeqNo = Convert.ToString(reader["FBNKSEQNO"]);
-                        decimal recAmount = Convert.ToDecimal(reader["FRECAMOUNT"]);
-                        decimal claimAmount = Convert.ToDecimal(reader["FCLAIMAMOUNT"]);
-
-                        if (!batchDict.ContainsKey(bankSeqNo))
-                        {
-                            batchDict[bankSeqNo] = new List<ClaimBillInfo>();
-                        }
-                        batchDict[bankSeqNo].Add(new ClaimBillInfo
-                        {
-                            BillNo = billNo,
-                            RecAmount = recAmount,
-                            ClaimAmount = claimAmount
-                        });
-                    }
-                }
-
-                foreach (var batch in batchDict)
-                {
-                    string bankSeqNo = batch.Key;
-                    List<ClaimBillInfo> bills = batch.Value;
-
-                    decimal totalClaimAmount = bills.Sum(b => b.ClaimAmount);
-                    decimal recAmount = bills.First().RecAmount;
-
-                    if (bills.Any(b => b.RecAmount != recAmount))
-                    {
-                        throw new Exception($"交易流水号 {bankSeqNo} 对应的收款认领单流水总金额不一致，不允许下推！");
-                    }
-
-                    if (totalClaimAmount != recAmount)
-                    {
-                        string billNoList = string.Join(", ", bills.Select(b => b.BillNo));
-                        throw new Exception($"交易流水号 {bankSeqNo} 对应的收款认领单 {billNoList} 已认领金额之和({totalClaimAmount})不等于流水总金额({recAmount})，不允许下推！");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                if (ex.Message.Contains("不允许下推"))
-                {
-                    throw;
-                }
-                throw new Exception($"校验认款金额失败：{ex.Message}");
-            }
-        }
-
-        private class ClaimBillInfo
-        {
-            public string BillNo { get; set; }
             public decimal RecAmount { get; set; }
-            public decimal ClaimAmount { get; set; }
+            public int PayUnit { get; set; }
+            public int RecOrgId { get; set; }
+            public int AccountId { get; set; }
+            public int SettleTypeId { get; set; }
+
+            public string ToToken()
+            {
+                return string.Join("|",
+                    RecAmount.ToString("G29", CultureInfo.InvariantCulture),
+                    PayUnit.ToString(CultureInfo.InvariantCulture),
+                    RecOrgId.ToString(CultureInfo.InvariantCulture),
+                    AccountId.ToString(CultureInfo.InvariantCulture),
+                    SettleTypeId.ToString(CultureInfo.InvariantCulture));
+            }
         }
 
         /// <summary>
-        /// 执行单据下推，生成收款单（合并同流水全部未下推认领单）
+        /// 执行单据下推，生成收款单（合并传入的全部认领单）
         /// </summary>
-        private void PushToReceiveBill(List<long> billIds)
+        private void PushToReceiveBill(List<long> billIds, string sourceFormId)
         {
             try
             {
@@ -392,7 +427,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                 List<ListSelectedRow> selectedRows = new List<ListSelectedRow>();
                 foreach (long billId in billIds)
                 {
-                    ListSelectedRow row = new ListSelectedRow(Convert.ToString(billId), string.Empty, 0, SOURCE_FORMID);
+                    ListSelectedRow row = new ListSelectedRow(Convert.ToString(billId), string.Empty, 0, sourceFormId);
                     selectedRows.Add(row);
                 }
 
