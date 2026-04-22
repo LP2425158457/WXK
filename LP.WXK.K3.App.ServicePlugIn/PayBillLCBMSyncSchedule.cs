@@ -8,8 +8,8 @@ using System.Data;
 namespace LP.WXK.K3.App.ServicePlugIn
 {
     /// <summary>
-    /// 付款单流程编码更新执行计划
-    /// 定期将付款单的单据编号同步到流程编码字段F_TWLG_LCBM
+    /// 付款单OA流程ID更新执行计划
+    /// 定期将付款单的单据编号同步到OA流程ID字段F_TWLG_OAPROCESSID
     /// </summary>
     public class PayBillLCBMSyncSchedule : IScheduleService
     {
@@ -20,22 +20,22 @@ namespace LP.WXK.K3.App.ServicePlugIn
         /// <param name="schedule">定时任务配置</param>
         public void Run(Context ctx, Schedule schedule)
         {
-            SyncPayBillLCBM(ctx);
+            SyncPayBillOAProcessId(ctx);
         }
 
         /// <summary>
-        /// 同步付款单流程编码
-        /// 将单据编号(FBILLNO)更新到流程编码字段(F_TWLG_LCBM)
+        /// 同步付款单OA流程ID
+        /// 将单据编号(FBILLNO)更新到OA流程ID字段(F_TWLG_OAPROCESSID)
         /// </summary>
         /// <param name="ctx">上下文</param>
-        private void SyncPayBillLCBM(Context ctx)
+        private void SyncPayBillOAProcessId(Context ctx)
         {
             try
             {
                 string sql = @"
                     UPDATE T_AP_PAYBILL
-                    SET F_TWLG_LCBM = FBILLNO
-                    WHERE (F_TWLG_LCBM IS NULL OR F_TWLG_LCBM = '' OR F_TWLG_LCBM = ' ')
+                    SET F_TWLG_OAPROCESSID = FBILLNO
+                    WHERE (F_TWLG_OAPROCESSID IS NULL OR F_TWLG_OAPROCESSID = '' OR F_TWLG_OAPROCESSID = ' ')
                       AND FDOCUMENTSTATUS = 'C'";
 
                 DBUtils.Execute(ctx, sql);

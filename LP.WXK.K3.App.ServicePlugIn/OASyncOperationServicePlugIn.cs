@@ -1,4 +1,4 @@
-﻿using Kingdee.BOS.Core.DynamicForm.PlugIn;
+using Kingdee.BOS.Core.DynamicForm.PlugIn;
 using System.ComponentModel;
 using Kingdee.BOS.Util;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
@@ -29,18 +29,19 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     string billNo = Convert.ToString(entity["BillNo"]);
                     var typeName = entity.DynamicObjectType.Name;
                     var tableName = "";
-                    string lcbm = "";
+                    string oaprocessid = "";
 
                     if (typeName.Equals("PAYBILL"))
                     {   // 付款单
                         tableName = "T_AP_PAYBILL";
-                        lcbm = GetLCBM(this.Context, tableName, payId);
                     }
                     else if (typeName.Equals("REFUNDBILL"))
                     {   // 收款退款单
                         tableName = "T_AR_REFUNDBILL";
-                        lcbm = GetNOTE(this.Context, tableName, payId);
                     }
+
+                    // 获取OA流程ID
+                    oaprocessid = GetOAProcessId(this.Context, tableName, payId);
 
                     // 检查是否已同步成功
                     if (IsAlreadySynced(this.Context, tableName, payId))
@@ -49,12 +50,12 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     }
 
                     // 检查流程编码是否为空
-                    if (string.IsNullOrWhiteSpace(lcbm))
+                    if (string.IsNullOrWhiteSpace(oaprocessid))
                     {
                         throw new Exception($"所选单据：{billNo} 不存在OA流程ID，不允许推送！");
                     }
 
-                    bool isSync = oASync.skipCurrentCodeAsync(this.Context, lcbm);
+                    bool isSync = oASync.skipCurrentCodeAsync(this.Context, oaprocessid);
                     // F_TWLG_OAStatus = 0（未反写）、1（已处理）
                     if (isSync)
                     {
@@ -100,44 +101,31 @@ namespace LP.WXK.K3.App.ServicePlugIn
             return false;
         }
 
-        private string GetLCBM(Context ctx, string tableName, long billId)
+        /// <summary>
+        /// 获取OA流程ID
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="tableName">表名</param>
+        /// <param name="billId">单据ID</param>
+        /// <returns>OA流程ID</returns>
+        private string GetOAProcessId(Context ctx, string tableName, long billId)
         {
-            string lcbm = "";
+            string oaprocessid = "";
             try
             {
-                string sql = string.Format("SELECT F_TWLG_LCBM FROM {0} WHERE FID = {1}", tableName, billId);
+                string sql = string.Format("SELECT F_TWLG_OAPROCESSID FROM {0} WHERE FID = {1}", tableName, billId);
                 using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
                 {
                     if (reader.Read())
                     {
-                        lcbm = Convert.ToString(reader["F_TWLG_LCBM"]) ?? "";
+                        oaprocessid = Convert.ToString(reader["F_TWLG_OAPROCESSID"]) ?? "";
                     }
                 }
             }
             catch (Exception)
             {
             }
-            return lcbm;
-        }
-
-        private string GetNOTE(Context ctx, string tableName, long billId)
-        {
-            string lcbm = "";
-            try
-            {
-                string sql = string.Format("SELECT FREMARK FROM {0} WHERE FID = {1}", tableName, billId);
-                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
-                {
-                    if (reader.Read())
-                    {
-                        lcbm = Convert.ToString(reader["FREMARK"]) ?? "";
-                    }
-                }
-            }
-            catch (Exception)
-            {
-            }
-            return lcbm;
+            return oaprocessid;
         }
     }
 }
