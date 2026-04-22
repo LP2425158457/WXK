@@ -19,6 +19,9 @@ namespace LP.WXK.K3.App.ServicePlugIn
             base.AfterExecuteOperationTransaction(e);
 
             OASyncService oASync = new OASyncService();
+            int syncSuccessCount = 0;
+            int syncFailCount = 0;
+
             // 读取全部的单据,for循环,转换成DynamicObject类型
             foreach (DynamicObject entity in e.DataEntitys)
             {
@@ -38,6 +41,12 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     else if (typeName.Equals("REFUNDBILL"))
                     {   // 收款退款单
                         tableName = "T_AR_REFUNDBILL";
+                        
+                        // 收款退款单需要先有已付款确认的动作后才能同步OA
+                        if (!IsBankStatusPaid(this.Context, payId))
+                        {
+                            throw new Exception($"收款退款单 {billNo} 尚未执行已付款确认，不允许同步OA！");
+                        }
                     }
 
                     // 获取OA流程ID
@@ -61,14 +70,23 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     {
                         string sqlStr = string.Format(@"update {0} set F_TWLG_OAStatus = 1 where FID = {1}", tableName, payId);
                         DBUtils.Execute(this.Context, sqlStr);
+                        syncSuccessCount++;
                     }
                     else
                     {
-                        string sqlStr = string.Format(@"update {0} set F_TWLG_OAStatus = 0 where FID = {1}", tableName, payId);
+                        string sqlStr = string.Format(@"update {0} set F_TWLG_OAStatus = 2 where FID = {1}", tableName, payId);
                         DBUtils.Execute(this.Context, sqlStr);
+                        syncFailCount++;
                     }
                 }
             }
+
+            // 记录同步结果日志
+            string logMessage = syncFailCount > 0 
+                ? $"OA同步完成：成功 {syncSuccessCount} 笔，失败 {syncFailCount} 笔"
+                : $"OA同步完成：成功 {syncSuccessCount} 笔";
+            
+            Kingdee.BOS.Log.Logger.Info("OASync", logMessage, this.Context);
         }
 
         /// <summary>
@@ -126,6 +144,60 @@ namespace LP.WXK.K3.App.ServicePlugIn
             {
             }
             return oaprocessid;
+        }
+
+        /// <summary>
+        /// 检查收款退款单银行处理状态是否为已付款确认
+        /// </summary>
+        /// <param name="ctx">上下文</param>
+        /// <param name="billId">单据ID</param>
+        /// <returns>银行处理状态是否为已付款确认</returns>
+        private bool IsBankStatusPaid(Context ctx, long billId)
+        {
+            try
+            {
+                // 尝试使用正确的字段名，兼容大小写
+                string sql = string.Format(@"
+                    SELECT FBankStatus 
+                    FROM T_AR_REFUNDBILLENTRY_B 
+                    WHERE FID = {0}", billId);
+                
+                using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                {
+                    if (reader.Read())
+                    {
+                        string bankStatus = Convert.ToString(reader["FBankStatus"]);
+                        // 已付款确认状态通常为 'F' 或其他表示已确认的状态
+                        // 根据OASyncOperationSchedule.cs中的常量定义，已付款状态是 'F'
+                        return bankStatus == "F"; // 'F' 通常表示已付款确认
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 如果第一种方式失败，尝试另一种可能的字段名
+                try
+                {
+                    string sql = string.Format(@"
+                        SELECT FBANKSTATUS 
+                        FROM T_AR_REFUNDBILLENTRY_B 
+                        WHERE FID = {0}", billId);
+                    
+                    using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
+                    {
+                        if (reader.Read())
+                        {
+                            string bankStatus = Convert.ToString(reader["FBANKSTATUS"]);
+                            return bankStatus == "F"; // 'F' 通常表示已付款确认
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // 如果都失败，返回false
+                }
+            }
+            return false;
         }
     }
 }
