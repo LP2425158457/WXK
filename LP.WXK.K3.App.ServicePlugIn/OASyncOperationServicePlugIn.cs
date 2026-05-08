@@ -41,11 +41,11 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     else if (typeName.Equals("REFUNDBILL"))
                     {   // 收款退款单
                         tableName = "T_AR_REFUNDBILL";
-                        
+
                         // 收款退款单需要先有已付款确认的动作后才能同步OA
                         if (!IsBankStatusPaid(this.Context, payId))
                         {
-                            throw new Exception($"收款退款单 {billNo} 尚未执行已付款确认，不允许同步OA！");
+                           throw new Exception($"收款退款单 {billNo} 尚未执行已付款确认，不允许同步OA！");
                         }
                     }
 
@@ -61,7 +61,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     // 检查流程编码是否为空
                     if (string.IsNullOrWhiteSpace(oaprocessid))
                     {
-                        throw new Exception($"所选单据：{billNo} 不存在OA流程ID，不允许推送！");
+                       throw new Exception($"所选单据：{billNo} 不存在OA流程ID，不允许推送！");
                     }
 
                     bool isSync = oASync.skipCurrentCodeAsync(this.Context, oaprocessid);
@@ -82,11 +82,11 @@ namespace LP.WXK.K3.App.ServicePlugIn
             }
 
             // 记录同步结果日志
-            string logMessage = syncFailCount > 0 
+            string logMessage = syncFailCount > 0
                 ? $"OA同步完成：成功 {syncSuccessCount} 笔，失败 {syncFailCount} 笔"
                 : $"OA同步完成：成功 {syncSuccessCount} 笔";
-            
-            Kingdee.BOS.Log.Logger.Info("OASync", logMessage, this.Context);
+
+            Kingdee.BOS.Log.Logger.Info("OASync", logMessage);
         }
 
         /// <summary>
@@ -161,7 +161,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                     SELECT FBankStatus 
                     FROM T_AR_REFUNDBILLENTRY_B 
                     WHERE FID = {0}", billId);
-                
+
                 using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
                 {
                     if (reader.Read())
@@ -182,7 +182,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
                         SELECT FBANKSTATUS 
                         FROM T_AR_REFUNDBILLENTRY_B 
                         WHERE FID = {0}", billId);
-                    
+
                     using (IDataReader reader = DBUtils.ExecuteReader(ctx, sql))
                     {
                         if (reader.Read())

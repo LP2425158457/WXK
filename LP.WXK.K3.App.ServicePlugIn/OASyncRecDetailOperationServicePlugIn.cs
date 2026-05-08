@@ -20,7 +20,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         {
             base.AfterExecuteOperationTransaction(e);
             RecDetailService recDetailSync = new RecDetailService();
-            
+
             int syncSuccessCount = 0;
             int syncFailCount = 0;
 
@@ -70,11 +70,11 @@ namespace LP.WXK.K3.App.ServicePlugIn
             }
 
             // 记录同步结果日志
-            string logMessage = syncFailCount > 0 
+            string logMessage = syncFailCount > 0
                 ? $"银行交易明细OA同步完成：成功 {syncSuccessCount} 笔，失败 {syncFailCount} 笔"
                 : $"银行交易明细OA同步完成：成功 {syncSuccessCount} 笔";
-            
-            Kingdee.BOS.Log.Logger.Info("OASyncRecDetail", logMessage, this.Context);
+
+            Kingdee.BOS.Log.Logger.Info("OASyncRecDetail", logMessage);
         }
 
         /// <summary>
