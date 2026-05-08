@@ -16,7 +16,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Name.Equals("OASync", System.StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("OASync", System.StringComparison.OrdinalIgnoreCase))
             {
                 if (e.OperationResult.IsSuccess)
                 {
@@ -41,7 +41,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Name.Equals("OASync", System.StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("OASync", System.StringComparison.OrdinalIgnoreCase))
             {
                 if (e.OperationResult.IsSuccess)
                 {
@@ -66,7 +66,7 @@ namespace LP.WXK.K3.App.ServicePlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Name.Equals("OASyncRecDetail", System.StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("OASync", System.StringComparison.OrdinalIgnoreCase))
             {
                 if (e.OperationResult.IsSuccess)
                 {
